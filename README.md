@@ -109,8 +109,6 @@ cp .env.example .env
 
 Configure `.env` and `config_params.json` as described in the [Configuration](#configuration) section.
 
-Create the directory configured by `INPUT_DIR` (`input/` by default) if it does not exist, and place one or two test recordings inside it.
-
 Then run:
 
 ```bash
