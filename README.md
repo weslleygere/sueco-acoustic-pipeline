@@ -66,19 +66,7 @@ cd sueco-acoustic-pipeline
 
 ### 2. Create a virtual environment
 
-This project uses **Python 3.14**. Before continuing, confirm that the command for your operating system reports `Python 3.14.x`.
-
-Windows:
-
-```powershell
-python --version
-```
-
-macOS or Linux:
-
-```bash
-python3.14 --version
-```
+**Python 3.14 is recommended** for a consistent and reproducible environment.
 
 Windows PowerShell:
 
@@ -90,7 +78,7 @@ python -m venv .venv
 macOS or Linux:
 
 ```bash
-python3.14 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 ```
 

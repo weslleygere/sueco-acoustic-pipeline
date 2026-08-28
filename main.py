@@ -1,5 +1,4 @@
 import logging
-import sys
 
 from src.audio_pipeline import AudioProcessingPipeline
 from src.config.env_config import Settings
@@ -7,23 +6,9 @@ from src.config.logging_config import LogSetup
 from src.config.processing_config import AcousticIndexConfig, PreprocessingConfig
 
 
-REQUIRED_PYTHON = (3, 14)
-
-
-def _validate_python_version() -> None:
-    """Require the standardized Python minor version."""
-
-    if sys.version_info[:2] != REQUIRED_PYTHON:
-        raise RuntimeError(
-            "This project requires Python 3.14.x; "
-            f"found {sys.version_info.major}.{sys.version_info.minor}."
-        )
-
-
 def main() -> None:
     """Run the configured audio processing pipeline."""
 
-    _validate_python_version()
     LogSetup.setup_bootstrap_logging()
     logger = logging.getLogger(__name__)
 
