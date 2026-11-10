@@ -30,6 +30,8 @@ class AudioProcessingPipeline:
         self.preprocessing_config = preprocessing_config
         self.acoustic_index_config = acoustic_index_config
 
+        self._validate_configuration()
+
     def run(self) -> BatchProcessingResult:
         """Run the configured audio processing stages."""
 
@@ -71,6 +73,9 @@ class AudioProcessingPipeline:
     ) -> PreprocessingStage | None:
         """Build the preprocessing stage when enabled."""
 
+        if not self.settings.preprocess_audio:
+            return None
+
         assert self.preprocessing_config is not None
 
         return PreprocessingStage(
@@ -88,5 +93,25 @@ class AudioProcessingPipeline:
     ) -> AcousticIndexProcessor | None:
         """Build the acoustic-index processor when enabled."""
 
+        if not self.settings.extract_acoustic_indices:
+            return None
+
         assert self.acoustic_index_config is not None
         return AcousticIndexProcessor(self.acoustic_index_config)
+
+    def _validate_configuration(self) -> None:
+        """Validate enabled stage configuration."""
+
+        if self.settings.preprocess_audio and self.preprocessing_config is None:
+            raise ValueError(
+                "PreprocessingConfig is required when PREPROCESS_AUDIO is enabled"
+            )
+
+        if (
+            self.settings.extract_acoustic_indices
+            and self.acoustic_index_config is None
+        ):
+            raise ValueError(
+                "AcousticIndexConfig is required when "
+                "EXTRACT_ACOUSTIC_INDICES is enabled"
+            )

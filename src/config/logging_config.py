@@ -86,6 +86,8 @@ class LogSetup:
             f"Input Directory          : {settings.input_dir}",
             f"Output Directory         : {self.output_dir}",
             f"Audio Extensions         : {', '.join(settings.audio_extensions)}",
+            f"Preprocess Audio         : {settings.preprocess_audio}",
+            f"Extract Acoustic Indices : {settings.extract_acoustic_indices}",
             f"Max Workers              : {settings.max_workers}",
         ]
 
