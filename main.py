@@ -21,24 +21,10 @@ def main() -> None:
         log_setup.setup_logging()
         log_setup.write_log_metadata()
 
-        logger.info(
-            "Starting audio processing pipeline. "
-            "Preprocessing: %s | Acoustic indices: %s",
-            settings.preprocess_audio,
-            settings.extract_acoustic_indices,
-        )
+        logger.info("Starting preprocessing and acoustic-index extraction.")
 
-        preprocessing_config = (
-            PreprocessingConfig(settings.config_params_path)
-            if settings.preprocess_audio
-            else None
-        )
-
-        acoustic_index_config = (
-            AcousticIndexConfig(settings.config_params_path)
-            if settings.extract_acoustic_indices
-            else None
-        )
+        preprocessing_config = PreprocessingConfig(settings.config_params_path)
+        acoustic_index_config = AcousticIndexConfig(settings.config_params_path)
 
         result = AudioProcessingPipeline(
             settings=settings,

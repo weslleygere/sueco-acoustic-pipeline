@@ -1,3 +1,4 @@
+# SuEcO: lazy audio streaming, version 1
 from pathlib import Path
 
 import numpy as np
@@ -5,6 +6,14 @@ import soundfile as sf
 from numpy.typing import NDArray
 
 from ..domain.audio_types import AudioLoadResult, FailedAudio, LoadedAudio
+
+
+class AudioStreamError(Exception):
+    """Carry the original error encountered while streaming soundfile data."""
+
+    def __init__(self, original: Exception) -> None:
+        self.original = original
+        super().__init__(str(original))
 
 
 class AudioLoader:
@@ -35,27 +44,10 @@ class AudioLoader:
                 error_message=str(exc),
             )
 
-
-class ProcessedAudioWriter:
-    """Save processed audio files."""
-
-    @staticmethod
-    def save_audio(
-        audio: LoadedAudio,
-        processed_path: Path,
-    ) -> None:
-        """Save processed audio as FLAC."""
-
-        _validate_audio(audio.wave, audio.sample_rate)
-
-        processed_path.parent.mkdir(parents=True, exist_ok=True)
-
-        sf.write(
-            str(processed_path),
-            audio.wave,
-            audio.sample_rate,
-            format="FLAC",
-        )
+    def open_audio(self, file_path: Path | str) -> sf.SoundFile:
+        """Open an audio stream. Caller owns the context manager."""
+        path = Path(file_path).expanduser().resolve()
+        return sf.SoundFile(str(path))
 
 
 def _validate_audio(

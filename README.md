@@ -12,40 +12,22 @@ The pipeline is intended for batch processing at SuEcO research nodes. It standa
 ## Features
 
 * Supports mono and stereo recordings.
-* Supports preprocessing and acoustic-index extraction as independent or combined processing stages.
+* Always preprocesses recordings and calculates acoustic indices in one workflow.
 * Optionally divides long recordings into overlapping or non-overlapping segments.
 * Detects clipping independently in each audio channel.
 * Removes DC offset by default.
 * Optionally downsamples recordings when required.
-* Saves processed recordings in lossless FLAC format.
+* Processes audio in memory; it does not save new FLAC files.
 * Calculates temporal and spectral acoustic indices with [scikit-maad](https://scikit-maad.github.io/).
 * Supports parallel processing across multiple audio files.
 * Stores processing results and errors in Parquet files.
 
 ## How the pipeline works
 
-Preprocessing and acoustic-index extraction can run together or independently:
-
-```mermaid
-%% Adjust fontSize, nodeSpacing, and rankSpacing to resize the diagram.
-%%{init: {"flowchart": {"nodeSpacing": 50, "rankSpacing": 55}, "themeVariables": {"fontSize": "18px"}}}%%
-flowchart TD
-    A[Input audio files] --> B{Preprocess audio?}
-
-    B -->|Yes| C[Segment audio if configured]
-    B -->|No| G{Calculate acoustic indices?}
-
-    C --> D[Check clipping]
-    D --> E[Apply configured signal processing]
-    E --> F[Save processed FLAC and preprocessing results]
-
-    F --> G
-
-    G -->|Yes| H[Calculate acoustic indices per channel]
-    G -->|No| I[End]
-```
-
-When both stages are enabled, acoustic indices are calculated from successfully preprocessed audio. In index-only mode, input files are analyzed directly without segmentation or preprocessing.
+Every input recording is segmented when configured, checked for clipping,
+preprocessed in memory, and analyzed for acoustic indices. Only the Parquet
+reports and the execution log are written to disk. Every report refers to
+its original input recording, with chunk boundaries identifying segments.
 
 ## Quick start
 
@@ -137,12 +119,12 @@ The pipeline separates **runtime settings** from **processing parameters**:
 
 | File                                       | Purpose                                                         |
 | ------------------------------------------ | --------------------------------------------------------------- |
-| [`.env.example`](.env.example) → `.env`    | Input/output paths, enabled processing stages, and worker count |
+| [`.env.example`](.env.example) → `.env`    | Input/output paths, audio formats, and worker count |
 | [`config_params.json`](config_params.json) | Preprocessing and acoustic-index parameters                     |
 
 ### Runtime settings: `.env`
 
-The `.env` file controls where the audio files are located, where results are saved, and which stages of the pipeline are enabled.
+The `.env` file controls input/output directories, accepted audio formats, and worker count. Preprocessing and acoustic-index extraction always run.
 
 ```dotenv
 CONFIG_PARAMS_PATH=config_params.json
@@ -151,9 +133,6 @@ INPUT_DIR=input
 AUDIO_EXTENSIONS=.wav,.flac,.aif,.aiff,.ogg
 
 OUTPUT_DIR=output
-
-PREPROCESS_AUDIO=true
-EXTRACT_ACOUSTIC_INDICES=false
 
 MAX_WORKERS=-1
 ```
@@ -164,20 +143,9 @@ MAX_WORKERS=-1
 | `INPUT_DIR`                |                      `input` | Directory containing the audio files to process                                                                  |
 | `AUDIO_EXTENSIONS`         | `.wav,.flac,.aif,.aiff,.ogg` | Comma-separated audio extensions included in the search                                                          |
 | `OUTPUT_DIR`               |                     `output` | Directory where results are saved                                                                                |
-| `PREPROCESS_AUDIO`         |                       `true` | Enable audio preprocessing                                                                                       |
-| `EXTRACT_ACOUSTIC_INDICES` |                      `false` | Enable acoustic-index calculation                                                                                |
 | `MAX_WORKERS`              |                         `-1` | Number of workers used to process files; use an integer `≥ 1`, or `-1` to use all available CPU cores except one |
 
 `INPUT_DIR` can point to any directory containing the recordings to be processed. Its subdirectories are searched recursively.
-
-At least one processing stage must be enabled:
-
-| `PREPROCESS_AUDIO` | `EXTRACT_ACOUSTIC_INDICES` | Behavior                                                               |
-| -----------------: | -------------------------: | ---------------------------------------------------------------------- |
-|             `true` |                    `false` | Preprocess and save audio                                              |
-|             `true` |                     `true` | Preprocess audio, then calculate indices from the processed recordings |
-|            `false` |                     `true` | Calculate indices directly from the input audio                        |
-|            `false` |                    `false` | Invalid configuration                                                  |
 
 ### Processing parameters: `config_params.json`
 
@@ -291,25 +259,23 @@ Every run creates a timestamped directory below `OUTPUT_DIR`:
 output/
 └── YYYYMMDD_HHMMSS/
     ├── experiment.log
-    ├── processed_audio/
     ├── preprocessing_success.parquet
     ├── preprocessing_issues.parquet
     ├── acoustic_indices.parquet
     └── acoustic_index_failures.parquet
 ```
 
-`experiment.log` is created for every run. Processed audio and Parquet reports are created only when they contain results.
+`experiment.log` is created for every run. Parquet reports are created when they contain results. No processed audio files are saved.
 
 | Output                            | Contents                                                    |
 | --------------------------------- | ----------------------------------------------------------- |
-| `processed_audio/`                | Successfully preprocessed recordings saved as lossless FLAC |
 | `preprocessing_success.parquet`   | Processing provenance for successfully processed recordings |
 | `preprocessing_issues.parquet`    | Clipping and other preprocessing issues                     |
 | `acoustic_indices.parquet`        | Calculated temporal and spectral acoustic indices           |
 | `acoustic_index_failures.parquet` | Errors encountered during acoustic-index calculation        |
 | `experiment.log`                  | Configuration and execution information for the run         |
 
-Processed filenames preserve channel provenance. For example, `_wav_mono_right.flac` indicates that the original recording was stereo and only the right channel was retained. Segmented recordings also include a zero-padded marker such as `_chunk_000000`.
+Reports reference each original input recording; segment indices and start/end times retain traceability.
 
 ## Citation
 

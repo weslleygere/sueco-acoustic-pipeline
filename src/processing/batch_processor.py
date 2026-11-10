@@ -1,8 +1,11 @@
+# SuEcO: lazy audio streaming, version 1
 import sys
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import soundfile as sf
 from time import monotonic
 
 from ..domain.audio_types import (
@@ -11,8 +14,9 @@ from ..domain.audio_types import (
     LoadedAudio,
     PreprocessedAudio,
 )
-from ..io.audio_files import AudioFileFinder, ProcessedAudioPathBuilder
-from ..io.audio_io import AudioLoader, ProcessedAudioWriter
+from ..io.audio_files import AudioFileFinder
+from ..io.audio_io import AudioLoader
+from ..io.audio_io import AudioStreamError
 from ..processing.acoustic_indices import (
     AcousticIndexProcessor,
     AcousticIndexRow,
@@ -113,8 +117,6 @@ class PreprocessingStage:
 
     processor: PreProcessor
     chunker: AudioChunker
-    path_builder: ProcessedAudioPathBuilder
-    writer: ProcessedAudioWriter
 
 
 class AudioFileProcessor:
@@ -124,45 +126,28 @@ class AudioFileProcessor:
         self,
         audio_loader: AudioLoader,
         input_dir: Path,
-        output_dir: Path,
-        preprocessing: PreprocessingStage | None = None,
-        acoustic_index_processor: AcousticIndexProcessor | None = None,
+        preprocessing: PreprocessingStage,
+        acoustic_index_processor: AcousticIndexProcessor,
     ) -> None:
-        if preprocessing is None and acoustic_index_processor is None:
-            raise ValueError(
-                "At least one processing stage must be configured"
-            )
-
         self.audio_loader = audio_loader
         self.input_dir = input_dir.expanduser().resolve()
-        self.output_dir = output_dir.expanduser().resolve()
         self.preprocessing = preprocessing
         self.acoustic_index_processor = acoustic_index_processor
 
-    def process_file(
-        self,
-        file_path: Path,
-    ) -> BatchProcessingResult:
-        """Load one audio file and run the configured processing stages."""
-
-        loaded_audio = self.audio_loader.load_audio(file_path)
-
-        if isinstance(loaded_audio, FailedAudio):
+    def process_file(self, file_path: Path) -> BatchProcessingResult:
+        """Stream original-file segments through the unchanged scientific stages."""
+        try:
+            with self.audio_loader.open_audio(file_path) as source:
+                return self._process_preprocessing(file_path, source)
+        except Exception as exc:
             return self._loading_failure_result(
                 file_path,
-                loaded_audio,
+                FailedAudio(
+                    file_name=file_path.name,
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                ),
             )
-
-        if self.preprocessing is None:
-            return self._extract_acoustic_indices(
-                audio=loaded_audio,
-                audio_path=file_path,
-            )
-
-        return self._process_preprocessing(
-            file_path,
-            loaded_audio,
-        )
 
     def _loading_failure_result(
         self,
@@ -171,22 +156,11 @@ class AudioFileProcessor:
     ) -> BatchProcessingResult:
         """Route a loading failure to the active processing stage."""
 
-        if self.preprocessing is not None:
-            return BatchProcessingResult(
-                preprocessing_issue_rows=[
-                    self._preprocessing_issue_row(
-                        file_path=file_path,
-                        stage="loading",
-                        error_type=failure.error_type,
-                        error_message=failure.error_message,
-                    )
-                ]
-            )
-
         return BatchProcessingResult(
-            acoustic_index_failure_rows=[
-                self._acoustic_index_failure_row(
-                    audio_path=file_path,
+            preprocessing_issue_rows=[
+                self._preprocessing_issue_row(
+                    file_path=file_path,
+                    stage="loading",
                     error_type=failure.error_type,
                     error_message=failure.error_message,
                 )
@@ -196,15 +170,25 @@ class AudioFileProcessor:
     def _process_preprocessing(
         self,
         file_path: Path,
-        audio: LoadedAudio,
+        source: sf.SoundFile,
     ) -> BatchProcessingResult:
-        """Chunk and preprocess one loaded audio file."""
-
-        assert self.preprocessing is not None
-
+        """Process each streamed segment immediately; retain only report rows."""
         try:
-            chunks = self.preprocessing.chunker.split(audio)
-
+            return BatchProcessingResult.combine(
+                self._process_chunk(file_path, chunk)
+                for chunk in self.preprocessing.chunker.split_stream(source, file_path.name)
+            )
+        except AudioStreamError as exc:
+            # Equivalent to a full-file load error: discard partial results.
+            original = exc.original
+            return self._loading_failure_result(
+                file_path,
+                FailedAudio(
+                    file_name=file_path.name,
+                    error_type=type(original).__name__,
+                    error_message=str(original),
+                ),
+            )
         except Exception as exc:
             return BatchProcessingResult(
                 preprocessing_issue_rows=[
@@ -213,24 +197,17 @@ class AudioFileProcessor:
                         stage="chunking",
                         error_type=type(exc).__name__,
                         error_message=str(exc),
-                        channels=self._channel_count(audio),
+                        channels=source.channels,
                     )
                 ]
             )
-
-        return BatchProcessingResult.combine(
-            self._process_chunk(file_path, chunk)
-            for chunk in chunks
-        )
 
     def _process_chunk(
         self,
         file_path: Path,
         chunk: AudioChunk,
     ) -> BatchProcessingResult:
-        """Preprocess, save, and optionally analyze one audio chunk."""
-
-        assert self.preprocessing is not None
+        """Preprocess and analyze one audio chunk entirely in memory."""
 
         result = BatchProcessingResult()
         input_channels = self._channel_count(chunk.audio)
@@ -282,35 +259,9 @@ class AudioFileProcessor:
                 )
             )
 
-        try:
-            processed_path = self.preprocessing.path_builder.build_path(
-                input_file_path=file_path,
-                audio=preprocessed,
-                chunk_index=chunk.index,
-            )
-
-            self.preprocessing.writer.save_audio(
-                audio=preprocessed.audio,
-                processed_path=processed_path,
-            )
-
-        except Exception as exc:
-            result.preprocessing_issue_rows.append(
-                self._preprocessing_issue_row(
-                    file_path=file_path,
-                    stage="saving",
-                    error_type=type(exc).__name__,
-                    error_message=str(exc),
-                    chunk=chunk,
-                    channels=len(preprocessed.saved_channels),
-                )
-            )
-            return result
-
         result.preprocessing_rows.append(
             self._preprocessing_row(
                 file_path=file_path,
-                processed_path=processed_path,
                 chunk=chunk,
                 audio=preprocessed,
             )
@@ -320,7 +271,7 @@ class AudioFileProcessor:
             result.extend(
                 self._extract_acoustic_indices(
                     audio=preprocessed.audio,
-                    audio_path=processed_path,
+                    audio_path=file_path,
                     chunk=chunk,
                 )
             )
@@ -370,7 +321,6 @@ class AudioFileProcessor:
     def _preprocessing_row(
         self,
         file_path: Path,
-        processed_path: Path,
         chunk: AudioChunk,
         audio: PreprocessedAudio,
     ) -> ReportRow:
@@ -379,7 +329,6 @@ class AudioFileProcessor:
         return {
             "file_name": audio.audio.file_name,
             "input_path": self._input_relative_path(file_path),
-            "processed_path": self._output_relative_path(processed_path),
             "chunk_index": chunk.index,
             "chunk_start_seconds": chunk.start_seconds,
             "chunk_end_seconds": chunk.end_seconds,
@@ -553,37 +502,9 @@ class AudioFileProcessor:
             .as_posix()
         )
 
-    def _output_relative_path(
-        self,
-        file_path: Path,
-    ) -> str:
-        """Return a path relative to the current output directory."""
-
-        return (
-            file_path
-            .expanduser()
-            .resolve()
-            .relative_to(self.output_dir)
-            .as_posix()
-        )
-
-    def _audio_relative_path(
-        self,
-        audio_path: Path,
-    ) -> str:
-        """Return analyzed audio path relative to its appropriate root."""
-
-        resolved_path = audio_path.expanduser().resolve()
-
-        try:
-            return resolved_path.relative_to(
-                self.output_dir
-            ).as_posix()
-
-        except ValueError:
-            return resolved_path.relative_to(
-                self.input_dir
-            ).as_posix()
+    def _audio_relative_path(self, audio_path: Path) -> str:
+        """Path of the original recording, relative to INPUT_DIR."""
+        return self._input_relative_path(audio_path)
 
 
 class SequentialBatchProcessor:

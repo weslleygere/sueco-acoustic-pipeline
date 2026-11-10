@@ -1,7 +1,7 @@
 {
   "preprocessing": {
     "segmentation": {
-      "duration_seconds": null,
+      "duration_seconds": 60,
       "overlap_seconds": 0
     },
     "quality_control": {
@@ -18,7 +18,7 @@
     "frequency_bands_hz": {
       "low": [0, 1000],
       "mid": [1000, 10000],
-      "high": [10000, 48000]
+      "high": [10000, 24000]
     }
   }
 }

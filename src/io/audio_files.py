@@ -1,8 +1,5 @@
 from pathlib import Path
 
-from ..domain.audio_types import PreprocessedAudio
-
-
 class AudioFileFinder:
     """Find audio files recursively under an input directory."""
 
@@ -47,56 +44,4 @@ class AudioFileFinder:
                 for extension in audio_extensions
             )
             if extension
-        )
-
-
-class ProcessedAudioPathBuilder:
-    """Build traceable FLAC output paths for preprocessed audio."""
-
-    def __init__(self, input_dir: Path, output_dir: Path) -> None:
-        self.input_dir = input_dir
-        self.processed_audio_dir = output_dir / "processed_audio"
-
-    def build_path(
-        self,
-        input_file_path: Path,
-        audio: PreprocessedAudio,
-        chunk_index: int | None = None,
-    ) -> Path:
-        """Return the processed FLAC output path."""
-
-        relative_path = input_file_path.relative_to(self.input_dir)
-        output_dir = self.processed_audio_dir / relative_path.parent
-
-        original_extension = input_file_path.suffix.lower().lstrip(".")
-        output_stem = f"{input_file_path.stem}_{original_extension}"
-
-        if chunk_index is not None:
-            output_stem = f"{output_stem}_chunk_{chunk_index:06d}"
-
-        channel_suffix = self._channel_suffix(audio)
-
-        return output_dir / f"{output_stem}_{channel_suffix}.flac"
-
-    @staticmethod
-    def _channel_suffix(audio: PreprocessedAudio) -> str:
-        """Return a suffix describing the processed channel layout."""
-
-        original = audio.original_channels
-        saved = audio.saved_channels
-
-        if original == ["mono"] and saved == ["mono"]:
-            return "mono"
-
-        if original == ["left", "right"] and saved == ["left", "right"]:
-            return "stereo"
-
-        if original == ["left", "right"] and saved == ["left"]:
-            return "mono_left"
-
-        if original == ["left", "right"] and saved == ["right"]:
-            return "mono_right"
-
-        raise ValueError(
-            f"Unsupported channel configuration: original={original}, saved={saved}"
         )

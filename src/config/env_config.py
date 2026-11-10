@@ -16,8 +16,6 @@ class Settings:
     input_dir: Path
     output_dir_base: Path
     audio_extensions: tuple[str, ...]
-    preprocess_audio: bool = True
-    extract_acoustic_indices: bool = False
     max_workers: int = -1
     output_dir: Path | None = field(init=False, default=None, repr=False)
 
@@ -32,7 +30,6 @@ class Settings:
         )
         self.max_workers = self._resolve_max_workers(self.max_workers)
 
-        self._validate_processing_stages()
         self._validate_processing_config_file()
         self._validate_input_dir()
         self._ensure_output_base_dir()
@@ -52,33 +49,10 @@ class Settings:
             audio_extensions=cls._parse_audio_extensions(
                 os.getenv("AUDIO_EXTENSIONS", ".wav,.flac,.aif,.aiff,.ogg")
             ),
-            preprocess_audio=cls._parse_bool(
-                os.getenv("PREPROCESS_AUDIO", "true"),
-                "PREPROCESS_AUDIO",
-            ),
-            extract_acoustic_indices=cls._parse_bool(
-                os.getenv("EXTRACT_ACOUSTIC_INDICES", "false"),
-                "EXTRACT_ACOUSTIC_INDICES",
-            ),
             max_workers=cls._parse_max_workers(
                 os.getenv("MAX_WORKERS", "-1")
             ),
         )
-
-    def _validate_processing_stages(self) -> None:
-        """Validate enabled processing stages."""
-
-        if not isinstance(self.preprocess_audio, bool):
-            raise ValueError("PREPROCESS_AUDIO must be a boolean")
-
-        if not isinstance(self.extract_acoustic_indices, bool):
-            raise ValueError("EXTRACT_ACOUSTIC_INDICES must be a boolean")
-
-        if not self.preprocess_audio and not self.extract_acoustic_indices:
-            raise ValueError(
-                "At least one processing stage must be enabled: "
-                "PREPROCESS_AUDIO or EXTRACT_ACOUSTIC_INDICES"
-            )
 
     def _validate_processing_config_file(self) -> None:
         """Validate the processing configuration file."""
@@ -169,22 +143,6 @@ class Settings:
             )
 
         return tuple(normalized)
-
-    @staticmethod
-    def _parse_bool(raw_value: str, variable_name: str) -> bool:
-        """Parse a boolean environment variable."""
-
-        value = raw_value.strip().lower()
-
-        if value in {"true", "1", "yes", "on"}:
-            return True
-
-        if value in {"false", "0", "no", "off"}:
-            return False
-
-        raise ValueError(
-            f"{variable_name} must be true or false"
-        )
 
     @staticmethod
     def _parse_max_workers(raw_value: str) -> int:

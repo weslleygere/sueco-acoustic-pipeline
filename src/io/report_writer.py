@@ -10,7 +10,6 @@ PREPROCESSING_SCHEMA = pa.schema(
     [
         ("file_name", pa.string()),
         ("input_path", pa.string()),
-        ("processed_path", pa.string()),
         ("chunk_index", pa.int64()),
         ("chunk_start_seconds", pa.float64()),
         ("chunk_end_seconds", pa.float64()),
