@@ -14,6 +14,7 @@ The pipeline is intended for batch processing at SuEcO research nodes. It standa
 * Supports mono and stereo recordings.
 * Always preprocesses recordings and calculates acoustic indices in one workflow.
 * Optionally divides long recordings into overlapping or non-overlapping segments.
+* Processes segmented recordings incrementally to reduce peak memory usage.
 * Detects clipping independently in each audio channel.
 * Removes DC offset by default.
 * Optionally downsamples recordings when required.
@@ -28,6 +29,12 @@ Every input recording is segmented when configured, checked for clipping,
 preprocessed in memory, and analyzed for acoustic indices. Only the Parquet
 reports and the execution log are written to disk. Every report refers to
 its original input recording, with chunk boundaries identifying segments.
+
+For segmented recordings, the pipeline reads audio incrementally and processes
+one segment at a time, avoiding the need to load entire recordings or retain
+all segments simultaneously in memory. When segmentation is disabled, the
+complete recording is processed as a single unit. These optimizations reduce
+memory usage without changing the acoustic-index calculations or report schemas.
 
 ## Quick start
 
@@ -101,13 +108,13 @@ python main.py
 
 For standardized cave ecoacoustic monitoring, SuEcO recommends:
 
-| Component          | Recommendation                                    |
+| Component | Recommendation |
 | ------------------ | ------------------------------------------------- |
-| Recording duration | **1 minute**                                      |
+| Recording duration | **1 minute** |
 | Recording interval | **Every 60 minutes throughout the 24-hour cycle** |
-| Sampling rate      | **96 kHz**                                        |
-| Audio format       | **Uncompressed WAV**                              |
-| Channels           | **Stereo when supported by the recorder**         |
+| Sampling rate | **96 kHz** |
+| Audio format | **Uncompressed WAV** |
+| Channels | **Stereo when supported by the recorder** |
 
 These recommendations provide a common baseline to improve comparability among cave ecoacoustic studies. Alternative sampling designs may be appropriate for specific research questions, but deviations should be documented.
 
@@ -117,10 +124,10 @@ The processing defaults described below are designed to complement this recommen
 
 The pipeline separates **runtime settings** from **processing parameters**:
 
-| File                                       | Purpose                                                         |
+| File | Purpose |
 | ------------------------------------------ | --------------------------------------------------------------- |
-| [`.env.example`](.env.example) → `.env`    | Input/output paths, audio formats, and worker count |
-| [`config_params.json`](config_params.json) | Preprocessing and acoustic-index parameters                     |
+| [`.env.example`](.env.example) → `.env` | Input/output paths, audio formats, and worker count |
+| [`config_params.json`](config_params.json) | Preprocessing and acoustic-index parameters |
 
 ### Runtime settings: `.env`
 
@@ -137,13 +144,13 @@ OUTPUT_DIR=output
 MAX_WORKERS=-1
 ```
 
-| Setting                    |                      Default | Description                                                                                                      |
+| Setting | Default | Description |
 | -------------------------- | ---------------------------: | ---------------------------------------------------------------------------------------------------------------- |
-| `CONFIG_PARAMS_PATH`       |         `config_params.json` | Path to the JSON file containing the processing parameters                                                       |
-| `INPUT_DIR`                |                      `input` | Directory containing the audio files to process                                                                  |
-| `AUDIO_EXTENSIONS`         | `.wav,.flac,.aif,.aiff,.ogg` | Comma-separated audio extensions included in the search                                                          |
-| `OUTPUT_DIR`               |                     `output` | Directory where results are saved                                                                                |
-| `MAX_WORKERS`              |                         `-1` | Number of workers used to process files; use an integer `≥ 1`, or `-1` to use all available CPU cores except one |
+| `CONFIG_PARAMS_PATH` | `config_params.json` | Path to the JSON file containing the processing parameters |
+| `INPUT_DIR` | `input` | Directory containing the audio files to process |
+| `AUDIO_EXTENSIONS` | `.wav,.flac,.aif,.aiff,.ogg` | Comma-separated audio extensions included in the search |
+| `OUTPUT_DIR` | `output` | Directory where results are saved |
+| `MAX_WORKERS` | `-1` | Number of workers used to process files; use an integer `≥ 1`, or `-1` to use all available CPU cores except one |
 
 `INPUT_DIR` can point to any directory containing the recordings to be processed. Its subdirectories are searched recursively.
 
@@ -179,13 +186,13 @@ The default `config_params.json` contains the processing settings recommended by
 
 #### Preprocessing parameters
 
-| Parameter                                      | Default | Meaning                                                                            |
+| Parameter | Default | Meaning |
 | ---------------------------------------------- | ------: | ---------------------------------------------------------------------------------- |
-| `segmentation.duration_seconds`                |  `null` | Segment duration in seconds; `null` keeps each recording as a single unit          |
-| `segmentation.overlap_seconds`                 |     `0` | Overlap in seconds between consecutive segments                                    |
-| `quality_control.clipping_amplitude_threshold` |  `0.99` | Normalized peak amplitude at which a channel is considered clipped                 |
-| `signal_processing.remove_dc_offset`           |  `true` | Removes the constant DC component; recommended for standard SuEcO processing       |
-| `signal_processing.target_sample_rate_hz`      |  `null` | Target sampling rate for downsampling; `null` preserves the original sampling rate |
+| `segmentation.duration_seconds` | `null` | Segment duration in seconds; `null` keeps each recording as a single unit |
+| `segmentation.overlap_seconds` | `0` | Overlap in seconds between consecutive segments |
+| `quality_control.clipping_amplitude_threshold` | `0.99` | Normalized peak amplitude at which a channel is considered clipped |
+| `signal_processing.remove_dc_offset` | `true` | Removes the constant DC component; recommended for standard SuEcO processing |
+| `signal_processing.target_sample_rate_hz` | `null` | Target sampling rate for downsampling; `null` preserves the original sampling rate |
 
 Because the recommended SuEcO sampling unit is already **1 minute**, segmentation is disabled by default. For longer recordings, set:
 
@@ -197,13 +204,13 @@ to divide them into 1-minute segments.
 
 Clipping is evaluated independently for each channel:
 
-| Input condition               | Result                         |
+| Input condition | Result |
 | ----------------------------- | ------------------------------ |
-| Mono, valid                   | Retained as mono               |
-| Mono, clipped                 | Segment rejected               |
-| Stereo, both channels valid   | Retained as stereo             |
-| Stereo, one channel clipped   | Valid channel retained as mono |
-| Stereo, both channels clipped | Segment rejected               |
+| Mono, valid | Retained as mono |
+| Mono, clipped | Segment rejected |
+| Stereo, both channels valid | Retained as stereo |
+| Stereo, one channel clipped | Valid channel retained as mono |
+| Stereo, both channels clipped | Segment rejected |
 
 When one stereo channel is clipped, the clipping issue is recorded while the valid channel continues through the pipeline.
 
@@ -225,12 +232,12 @@ The pipeline does not use this parameter to upsample recordings.
 
 #### Acoustic-index parameters
 
-| Parameter                 |          Default | Meaning                                        |
+| Parameter | Default | Meaning |
 | ------------------------- | ---------------: | ---------------------------------------------- |
-| `compatibility_mode`      |        `seewave` | Compatibility convention used by `scikit-maad` |
-| `frequency_bands_hz.low`  |      `[0, 1000]` | Low-frequency band in hertz                    |
-| `frequency_bands_hz.mid`  |  `[1000, 10000]` | Mid-frequency band in hertz                    |
-| `frequency_bands_hz.high` | `[10000, 48000]` | High-frequency band in hertz                   |
+| `compatibility_mode` | `seewave` | Compatibility convention used by `scikit-maad` |
+| `frequency_bands_hz.low` | `[0, 1000]` | Low-frequency band in hertz |
+| `frequency_bands_hz.mid` | `[1000, 10000]` | Mid-frequency band in hertz |
+| `frequency_bands_hz.high` | `[10000, 48000]` | High-frequency band in hertz |
 
 The default frequency bands are designed for the recommended **96 kHz** recordings, which have a Nyquist frequency of **48 kHz**. If recordings have a lower sampling rate, the upper frequency limits must be adjusted before calculating acoustic indices.
 
@@ -267,13 +274,13 @@ output/
 
 `experiment.log` is created for every run. Parquet reports are created when they contain results. No processed audio files are saved.
 
-| Output                            | Contents                                                    |
+| Output | Contents |
 | --------------------------------- | ----------------------------------------------------------- |
-| `preprocessing_success.parquet`   | Processing provenance for successfully processed recordings |
-| `preprocessing_issues.parquet`    | Clipping and other preprocessing issues                     |
-| `acoustic_indices.parquet`        | Calculated temporal and spectral acoustic indices           |
-| `acoustic_index_failures.parquet` | Errors encountered during acoustic-index calculation        |
-| `experiment.log`                  | Configuration and execution information for the run         |
+| `preprocessing_success.parquet` | Processing provenance for successfully processed recordings |
+| `preprocessing_issues.parquet` | Clipping and other preprocessing issues |
+| `acoustic_indices.parquet` | Calculated temporal and spectral acoustic indices |
+| `acoustic_index_failures.parquet` | Errors encountered during acoustic-index calculation |
+| `experiment.log` | Configuration and execution information for the run |
 
 Reports reference each original input recording; segment indices and start/end times retain traceability.
 
@@ -286,7 +293,6 @@ If you use this pipeline, please cite the associated manuscript once its final p
 Acoustic-index calculations are provided by `scikit-maad`. Please also cite:
 
 > Ulloa, J. S., Haupert, S., Latorre, J. F., Aubin, T., & Sueur, J. (2021). scikit-maad: An open-source and modular toolbox for quantitative soundscape analysis in Python. *Methods in Ecology and Evolution*. https://doi.org/10.1111/2041-210X.13711
-
 
 ## Support and contributions
 
